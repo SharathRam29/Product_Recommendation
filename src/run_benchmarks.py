@@ -13,7 +13,13 @@ import time
 import sys
 import warnings
 import logging
-
+import numpy as np
+import pandas as pd
+# import matplotlib.pyplot as plt
+# from sklearnex import patch_sklearn
+# patch_sklearn()
+#import daal.algorithms.kmeans as kmeans
+#from daal.algorithms.kmeans import init
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
@@ -24,9 +30,14 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 
 DATASET_FILE ="./data/flipkart_com-ecommerce_sample.csv"
-TRUE_K =12
+
+#Default value for the number of clusters
+TRUE_K =10
+
+#Hyperparameter tuning function
 def run_hyperparametertuning(X1):
     """run_hyperparametertuning"""
+    #Finding the best parameters for the model
     best_score = 0.001  # Setting the initial Silhoutte Score
     #Parameters for Hyperparameter Tuning
     no_cluster = [5,10, 15,20]  # number of clusters
@@ -46,6 +57,7 @@ def run_hyperparametertuning(X1):
             sum_time.append(time.time()-start)
             #Sihoutte score calculation from prediction
             score = silhouette_score(X1[:(int(datasize))], y_means)
+            #Silhoutte score helps in selecting the best number of clusters
             print("silhoutte score is :" ,score)
             #Check if the model score is greater than the best score
             if score > best_score:
@@ -56,6 +68,7 @@ def run_hyperparametertuning(X1):
     logger.info('Total fit and predict time taken during Hyperparameter Tuning in sec: %s', sum(sum_time))  # Calculation on time taken for Hyperparamater tuning
     return best_params
 
+#Splitting large datasets into several smaller datasets and predicting output for each batch
 def batch_inference(loaded_model):
     '''Performs batch inference'''
     # Warm up 
@@ -74,6 +87,7 @@ def batch_inference(loaded_model):
         logger.info('Time of Batch time recomendation:%s',end_time)
     logger.info('Average Time of Batch time recomendation:%s', sum(avg)/len(avg))  # Calculate the average time
 
+#Real time inference for calculating the total amount of time taken for the execution of the prediction process.
 def real_time_inference(product,model):
         """Perform Real time Inference """
         y_1 = vectorizer.transform([product])
@@ -84,18 +98,38 @@ def real_time_inference(product,model):
         end_time = time.time()-start_time_real
         return end_time
 
+#The output to show the other products that are similar to the selected product and recommend it.
 def show_recommendations(product,model):
         """show_recommendations"""
         y_1 = vectorizer.transform([product])
         y_1 = svd.transform(y_1)
         prediction = model.predict(y_1)
+        print()
         print("Recommendations for : ",product)
+        print("Vectorized Matrix: ", y_1)
+        print("Prediction: ", prediction)
+        print()
         print_cluster(prediction[0])
         
 if __name__ == "__main__":
     
     #Arguements
     parser = argparse.ArgumentParser()
+    
+    #parser for parsing several commands
+    
+#    usage: src/run_benchmarks.py [-d DATASET][-l LOGFILE][-i INTEL][-t TUNNING][-mp MODELPATH]
+
+#    optional arguments:
+#      -d DATASET, --dataset DATASET
+#                         Dataset size will be initialized
+#      -t TUNNING, --tunning HYPERPARAMS
+#                         Hyperparameter tuning will be enabled
+#      -i INTEL, --intel INTEL
+#                         use intel accelerated technologies where available
+#      -mp MODELPATH --modelpath MODELPATH
+#                          model path for inference
+
     parser.add_argument('-d',
                         '--datasetsize',
                         default=10000,
@@ -129,14 +163,18 @@ if __name__ == "__main__":
                         default=None,
                         help='model path')
 
+    #Parsing the given parameters
     FLAGS = parser.parse_args()
     datasize = FLAGS.datasetsize
+    
+    #Getting the logfile for flags
     if FLAGS.logfile == "":
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(filename=FLAGS.logfile, level=logging.DEBUG)
     logger = logging.getLogger()
-   
+    
+    #Checking if the flag uses Stock model or Intel extended models
     if FLAGS.intel:
         "import the intel sklearnex"
         logging.debug("Loading intel libraries..")
@@ -144,7 +182,9 @@ if __name__ == "__main__":
         patch_sklearn()
     else:
         logging.debug("Loading stock libraries..")
-    start_time_data_prep = time.time()  # Start of data prep  
+    start_time_data_prep = time.time() 
+    
+    # Start of data prep  
     try:
         train_original = pd.read_csv(DATASET_FILE)  #Read data from csv file
     except IOError as e:  # noqa:F841
@@ -155,7 +195,7 @@ if __name__ == "__main__":
         train= pd.concat([train,train_original ], ignore_index=True) # Concatenate the original data with the existing data
     train = train.head(datasize)
     print(len(train))
-    #import pdb;pdb.set_trace()
+
     logging.debug(train.shape)
     # Droping missing values
     train = train.dropna()
@@ -164,6 +204,8 @@ if __name__ == "__main__":
     # Converting text data into numeric data using TF-IDF vectorizer.
     vectorizer = TfidfVectorizer(stop_words='english')
     X = vectorizer.fit_transform(train["description"])
+    
+    #Truncated Single Value Decomposer for splitting X into n components
     svd = TruncatedSVD(n_components=10)
     X1 = svd.fit_transform(X)
     logging.debug(X1.shape)
@@ -172,11 +214,13 @@ if __name__ == "__main__":
     def print_cluster(i):
         """print_cluster"""
         print('Cluster %d:' % i),
+        #Getting centroids of all clusters
         for ind in order_centroids[i, :10]:           
             print(' %s' % terms[ind])
+        print()
     logger.info('Data preparation time:%s', time.time()-start_time_data_prep)
 
-    # Hyperparameter tuning
+    # Hyperparameter tuning of Flags
     if FLAGS.tuning:
         #Start hyperparameter tuning
         (cluster,iter) = run_hyperparametertuning(X1)
@@ -189,7 +233,8 @@ if __name__ == "__main__":
         logger.info('Kmeans_training_time_with the best params:%s', train_time)
         sys.exit(0)
 
-    # Start Training if inference flag is False    
+    # Start Training if inference flag is False
+    # If model path doesn't exist
     if FLAGS.modelpath is None:
     	# Fitting K-Means to the dataset 
         model = KMeans(n_clusters=TRUE_K, random_state=0)
@@ -201,12 +246,14 @@ if __name__ == "__main__":
         order_centroids = original_space_centroids.argsort()[:, ::-1]
         terms = vectorizer.get_feature_names()
         for i in range(TRUE_K):
-          print_cluster(i)
-        logger.info('Kmeans_training_time_without_Hyperparametertunning:%s', train_time)  # Calculate and print the time taken for hp tuning
+            print_cluster(i)
+        logger.info('Kmeans_training_time_without_Hyperparametertunning:%s', train_time)
+        # Calculate and print the time taken for hp tuning
         print("Saving model..........")
-        dump(model,"./saved_models/prod_rec.joblib")  #Save the model
+        dump(model,"./saved_models/prod_rec.joblib")  
+        #Save the model
 
-    # Inferencing
+    # Inferencing FLAGS
     if FLAGS.modelpath is not None:
         model = load(FLAGS.modelpath)
         original_space_centroids = svd.inverse_transform(model.cluster_centers_)
@@ -215,7 +262,8 @@ if __name__ == "__main__":
         #Calculate batch inference timings
         batch_inference(model)
         # Calculating realtime inference time.
-        List = ["cutting tool", "spray paint", "steel drill", "water", "powder"] 
+        #List = ["cutting tool", "spray paint", "steel drill", "water", "powder"]
+        List = ["necklace", "fabric", "monitor", "clothes", "diamond"]
         Avg = []       
         for i in List:
             time_inference_real = real_time_inference(i,model)
@@ -223,4 +271,5 @@ if __name__ == "__main__":
             Avg.append(time_inference_real)
             show_recommendations(i,model) 
         logger.info('Average Time of Real time recomendation:%s', sum(Avg)/len(Avg))  # Calculate average time for real time inference
+        print()
        
